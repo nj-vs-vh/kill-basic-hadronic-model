@@ -12,7 +12,8 @@ from nptyping import NDArray
 
 CUR_DIR = Path(__file__).parent
 
-import plots
+import utils
+from experiment import ExperimentalSED
 
 
 @dataclass
@@ -21,21 +22,37 @@ class ModelSED:
     color: str
     E: NDArray[(Any,), float]
     sed: NDArray[(Any,), float]
+    E_scale: Optional[float] = None
 
     def __post_init__(self):
         assert self.E.shape == self.sed.shape
 
+    def normalized_to_experimental_sed(self, exp: ExperimentalSED):
+        E_min = np.min(exp.E_left)
+        E_max = np.max(exp.E_right)
+        good_exp_sed = exp.sed_mean[np.isfinite(exp.sed_lower)]
+        exp_mean = np.mean(good_exp_sed)
+        model_mean = np.mean(self.sed[np.logical_and(self.E > E_min, self.E < E_max)])
+        return self.with_normalization(exp_mean / model_mean)
+
     def with_normalization(self, k: float) -> ModelSED:
         return ModelSED(
-            name=self.name + f" x {k:.2f}",
+            name=self.name,
             color=self.color,
             E=self.E,
             sed=self.sed * k,
+            E_scale=k if self.E_scale is None else k * self.E_scale,
         )
 
-    def plot(self, ax: plt.Axes):
-        plots.format_axes(ax)
-        ax.plot(self.E, self.sed, color=self.color, label=self.name)
+    def plot(self, ax: plt.Axes, E_min: Optional[float] = None, E_max: Optional[float] = None):
+        utils.format_axes(ax)
+        plot_label = self.name if self.E_scale is None else self.name + f" x {self.E_scale:.2f}"
+        mask = np.ones_like(self.E, dtype=bool)
+        if E_min is not None:
+            mask[self.E < E_min] = False
+        if E_max is not None:
+            mask[self.E > E_max] = False
+        ax.plot(self.E[mask], self.sed[mask], color=self.color, label=plot_label)
 
 
 class BasicHadronicModelSED(ModelSED):

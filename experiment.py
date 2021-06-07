@@ -14,7 +14,7 @@ from typing import Any, Callable, ClassVar, List
 from nptyping import NDArray
 
 import models
-import plots
+import utils
 
 
 CUR_DIR = Path(__file__).parent
@@ -122,7 +122,7 @@ class ExperimentalSED(ABC):
         return loglikelihood
 
     def with_E_factor(self, E_factor: float, color: str = None) -> ExperimentalSED:
-        return ExperimentalSED(
+        return self.__class__(
             name=self.name + f" shifted {100 * (E_factor - 1):.2f} %",
             color=color or self.color,
             E_right=self.E_right * E_factor,
@@ -133,7 +133,7 @@ class ExperimentalSED(ABC):
         )
 
     def plot(self, ax: plt.Axes):
-        plots.format_axes(ax)
+        utils.format_axes(ax)
         with_both_bounds = np.logical_and(np.isfinite(self.sed_lower), np.isfinite(self.sed_upper))
         E_mean = np.sqrt(self.E_left * self.E_right)
         E_err_left = E_mean - self.E_left
@@ -166,7 +166,7 @@ class ExperimentalSED(ABC):
 
 class FermiSED(ExperimentalSED):
     COLOR = "#dd4040"
-    SYSTEMATIC_E_UNCERAINTY = 0.05
+    SYSTEMATIC_E_UNCERAINTY = 0.1
 
     @classmethod
     def _from_file(cls, filename: str, name: str) -> FermiSED:
@@ -198,7 +198,7 @@ class FermiSED(ExperimentalSED):
 
 class IactSED(ExperimentalSED):
     COLOR = "#4ece7d"
-    SYSTEMATIC_E_UNCERAINTY = 0.15
+    SYSTEMATIC_E_UNCERAINTY = 0.35
 
     @classmethod
     def _from_file(cls, filename: str, name: str):
@@ -257,31 +257,51 @@ class Object:
             ]
         )
 
-    def get_joint_logposterior(self, model: models.ModelSED):
+    def get_join_logprior(self):
         logpriors = [sed.get_logprior() for sed in self.seds]
+        
+        return lambda *E_factors: sum(
+            logprior(E_factor) for logprior, E_factor in zip(logpriors, E_factors)
+        )
+
+    def get_joint_loglike(self, model: models.ModelSED):
         loglikes = [sed.get_loglikelihood(model) for sed in self.seds]
 
-        def logp(model_normalization: float, *E_factors: float):
-            joint_logprior = sum(
-                logprior(E_factor) for logprior, E_factor in zip(logpriors, E_factors)
-            )
-            if np.isinf(joint_logprior):
+        return lambda model_normalization, *E_factors: sum(
+            loglike(model_normalization, E_factor)
+            for loglike, E_factor in zip(loglikes, E_factors)
+        )
+
+    def get_joint_logposterior(self, model: models.ModelSED):
+
+        joint_logprior = self.get_join_logprior()
+        joint_loglike = self.get_joint_loglike(model)
+
+        def logposterior(model_normalization: float, *E_factors: float):
+            logp = joint_logprior(*E_factors)
+            if np.isinf(logp):
                 return -np.inf
             else:
-                return joint_logprior + sum(
-                    loglike(model_normalization, E_factor)
-                    for loglike, E_factor in zip(loglikes, E_factors)
-                )
+                return logp + joint_loglike(model_normalization, *E_factors)
 
-        return logp
+        return logposterior
 
-    @classmethod
     def with_E_factors(self, *E_factors) -> Object:
+        if len(E_factors) != len(self.seds):
+            raise ValueError(f"Number of E factors must be the same as the number of SEDs for the object")
         return self.__class__(
-            name=self.name,
+            name=self.name + ' (shifted SEDs)',
             z=self.z,
             seds=[sed.with_E_factor(E_factor) for sed, E_factor in zip(self.seds, E_factors)]
         )
+
+    @property
+    def E_min(self):
+        return min(np.min(sed.E_left) for sed in self.seds)
+    
+    @property
+    def E_max(self):
+        return max(np.max(sed.E_right) for sed in self.seds)
 
     def plot(self, ax: plt.Axes):
         for sed in self.seds:
