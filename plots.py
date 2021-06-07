@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 
 from typing import List
 
-from models import ModelSED
+from models.base import ModelSED
 from experiment import Object
 
 
@@ -15,9 +15,10 @@ def plot_objects_with_model(objects: List[Object], models: List[ModelSED]):
 
     for ax, obj, model in zip(axes, objects, models):
         obj.plot(ax)
-        E_center = 0.5 * (obj.E_min + obj.E_max)
-        E_range = obj.E_max - E_center
-        model.plot(ax, E_min=E_center - 1.1 * E_range, E_max=E_center + 1.1 * E_range)
+        # E_center = 0.5 * (obj.E_min + obj.E_max)
+        # E_range = obj.E_max - E_center
+        model.plot(ax, E_min=obj.E_min, E_max=obj.E_max)
         ax.legend()
 
     plt.show()
+    return fig, axes

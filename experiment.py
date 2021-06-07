@@ -13,7 +13,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Callable, ClassVar, List, Tuple
 from nptyping import NDArray
 
-import models
+from models.base import ModelSED
 import utils
 
 
@@ -77,7 +77,7 @@ class ExperimentalSED(ABC):
 
         return logprior
 
-    def get_loglikelihood(self, model: models.ModelSED):
+    def get_loglikelihood(self, model: ModelSED):
         # to allow njit-ted function to access these without going to class instance
         bin_count = self.sed_mean.size
         E_left = self.E_left
@@ -173,7 +173,7 @@ class FermiSED(ExperimentalSED):
         fermi_data *= 1e-6  # MeV -> TeV
         fermi_data[fermi_data < 0] = -np.inf  # -1 is used to signify 'no lower bound'
         return cls(
-            name=name + " (Fermi LAT)",
+            name=name + " (Fermi)",
             color=cls.COLOR,
             E_left=fermi_data[:, 0],
             E_right=fermi_data[:, 2],
@@ -258,7 +258,7 @@ class Object:
             logprior(E_factor) for logprior, E_factor in zip(logpriors, E_factors)
         )
 
-    def get_joint_loglike(self, model: models.ModelSED):
+    def get_joint_loglike(self, model: ModelSED):
         loglikes = [sed.get_loglikelihood(model) for sed in self.seds]
 
         return lambda model_params, E_factors: sum(
@@ -266,7 +266,7 @@ class Object:
             for loglike, E_factor in zip(loglikes, E_factors)
         )
 
-    def get_joint_logposterior(self, model: models.ModelSED):
+    def get_joint_logposterior(self, model: ModelSED):
 
         joint_logprior = self.get_joint_logprior()
         joint_loglike = self.get_joint_loglike(model)
