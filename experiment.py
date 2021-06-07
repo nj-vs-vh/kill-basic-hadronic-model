@@ -10,7 +10,7 @@ from pathlib import Path
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
 
-from typing import Any, Callable, ClassVar, List
+from typing import Any, Callable, ClassVar, List, Tuple
 from nptyping import NDArray
 
 import models
@@ -78,33 +78,24 @@ class ExperimentalSED(ABC):
         return logprior
 
     def get_loglikelihood(self, model: models.ModelSED):
-        bin_count = self.sed_mean.size
-        model_E = model.E
-        model_sed = model.sed
         # to allow njit-ted function to access these without going to class instance
+        bin_count = self.sed_mean.size
         E_left = self.E_left
         E_right = self.E_right
         sed_mean = self.sed_mean
         sed_upper = self.sed_upper
         sed_lower = self.sed_lower
 
-        @njit
-        def loglikelihood(model_normalization: float, E_factor: float):
+        model_average = model.get_average_func()
+
+        def loglikelihood(model_params: Tuple[float], E_factor: float):
             sed_mean_shifted = sed_mean * E_factor ** 2
             sed_upper_shifted = sed_upper * E_factor ** 2
             sed_lower_shifted = sed_lower * E_factor ** 2
             logL = 0.0
             for i in range(bin_count):
                 # shifting experimental bin on E_factor and computing average model SED in shifted bin
-                model_sed_in_shifted_bin = np.mean(
-                    model_normalization
-                    * model_sed[
-                        np.logical_and(
-                            model_E >= E_factor * E_left[i],
-                            model_E <= E_factor * E_right[i],
-                        )
-                    ]
-                )
+                model_sed_in_shifted_bin = model_average(E_factor * E_left[i], E_factor * E_right[i], *model_params)
                 if np.isnan(model_sed_in_shifted_bin):
                     return -np.inf
                 model_minus_mean = model_sed_in_shifted_bin - sed_mean_shifted[i]
@@ -118,6 +109,9 @@ class ExperimentalSED(ABC):
                             2 * (sed_mean_shifted[i] - sed_lower_shifted[i]) ** 2
                         )
             return logL
+        
+        if model.allows_njit:
+            loglikelihood = njit(loglikelihood)
 
         return loglikelihood
 
@@ -257,32 +251,32 @@ class Object:
             ]
         )
 
-    def get_join_logprior(self):
+    def get_joint_logprior(self):
         logpriors = [sed.get_logprior() for sed in self.seds]
         
-        return lambda *E_factors: sum(
+        return lambda E_factors: sum(
             logprior(E_factor) for logprior, E_factor in zip(logpriors, E_factors)
         )
 
     def get_joint_loglike(self, model: models.ModelSED):
         loglikes = [sed.get_loglikelihood(model) for sed in self.seds]
 
-        return lambda model_normalization, *E_factors: sum(
-            loglike(model_normalization, E_factor)
+        return lambda model_params, E_factors: sum(
+            loglike(model_params, E_factor)
             for loglike, E_factor in zip(loglikes, E_factors)
         )
 
     def get_joint_logposterior(self, model: models.ModelSED):
 
-        joint_logprior = self.get_join_logprior()
+        joint_logprior = self.get_joint_logprior()
         joint_loglike = self.get_joint_loglike(model)
 
-        def logposterior(model_normalization: float, *E_factors: float):
-            logp = joint_logprior(*E_factors)
+        def logposterior(model_params: Tuple[float], E_factors: Tuple[float]):
+            logp = joint_logprior(E_factors)
             if np.isinf(logp):
                 return -np.inf
             else:
-                return logp + joint_loglike(model_normalization, *E_factors)
+                return logp + joint_loglike(model_params, E_factors)
 
         return logposterior
 

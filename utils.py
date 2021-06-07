@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+from tqdm import tqdm
 
 from typing import Callable
 from nptyping import NDArray
@@ -13,7 +14,12 @@ def format_axes(ax: plt.Axes):
 
 
 def _evaluate_loglikes(sample: NDArray, loglike: Callable[[NDArray], float], progress: bool = False) -> NDArray:
-    return np.array([loglike(p) for p in sample])
+    res = np.zeros(shape=(sample.shape[0],))
+    if progress:
+        sample = tqdm(sample)
+    for i, point in enumerate(sample):
+        res[i] = loglike(point)
+    return res
 
 
 def max_loglike(sample: NDArray, loglike: Callable[[NDArray], float], progress: bool = False) -> float:

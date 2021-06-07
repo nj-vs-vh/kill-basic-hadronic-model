@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import numpy as np
 import matplotlib.pyplot as plt
+from numba import njit
 import re
 from pathlib import Path
 
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
-from typing import Any, Optional, Dict
+from typing import Any, Optional, Dict, Callable, Tuple, ClassVar
 from nptyping import NDArray
 
 CUR_DIR = Path(__file__).parent
@@ -17,54 +19,94 @@ from experiment import ExperimentalSED
 
 
 @dataclass
-class ModelSED:
+class ModelSED(ABC):
     name: str
     color: str
-    E: NDArray[(Any,), float]
-    sed: NDArray[(Any,), float]
-    E_scale: Optional[float] = None
+
+    allows_njit: ClassVar[bool] = False
+
+    @abstractmethod
+    def get_average_func(self) -> Callable[..., float]:
+        """Must return function that calculates model SED average over a given energy interval.
+        
+        Expected signature is model_average(E_min, E_max, *model_params)
+        """
+        pass
+
+    @abstractmethod
+    def set_parameters(self, *args):
+        """
+        ModelSED instance is **both** parametrized model and a particular state of that model.
+        This function provides interface to set parameters, and its signature should specify their meaning.
+        """
+
+    @abstractmethod
+    def plot(ax: plt.Axes, E_min: Optional[float] = None, E_max: Optional[float] = None):
+        pass
+
+
+# @dataclass
+# class AnalyticalSED(ModelSED):
+#     sed_func: Callable[..., float]  # SED(E, *model_params)
+#     sed_integral: Callable[[float, float], float]
+
+
+@dataclass
+class TableLookupSED(ModelSED):
+    E_lookup: NDArray[(Any,), float]
+    sed_lookup: NDArray[(Any,), float]
+
+    sed_scale: float = 1.0
 
     def __post_init__(self):
-        assert self.E.shape == self.sed.shape
+        assert self.E_lookup.shape == self.sed_lookup.shape
 
-    def normalized_to_experimental_sed(self, exp: ExperimentalSED):
+    def set_parameters(self, normalization: float):
+        self.sed_scale = normalization
+
+    allows_njit: ClassVar[bool] = True
+
+    def get_average_func(self):
+        E = self.E_lookup
+        sed = self.sed_lookup
+
+        @njit
+        def model_mean(E_min, E_max, normalization):
+            # simple mean works only for dense enough lookup tables
+            return np.mean(normalization * sed[np.logical_and(E >= E_min, E <= E_max)])
+
+        return model_mean
+
+    def normalize_to_experimental_sed(self, exp: ExperimentalSED):
+        """Modify model so that normalization of 1.0 gives same integral value as a given experimental SED"""
         E_min = np.min(exp.E_left)
         E_max = np.max(exp.E_right)
         good_exp_sed = exp.sed_mean[np.isfinite(exp.sed_lower)]
         exp_mean = np.mean(good_exp_sed)
-        model_mean = np.mean(self.sed[np.logical_and(self.E > E_min, self.E < E_max)])
-        return self.with_normalization(exp_mean / model_mean)
-
-    def with_normalization(self, k: float) -> ModelSED:
-        return ModelSED(
-            name=self.name,
-            color=self.color,
-            E=self.E,
-            sed=self.sed * k,
-            E_scale=k if self.E_scale is None else k * self.E_scale,
-        )
+        model_mean = np.mean(self.sed_lookup[np.logical_and(self.E_lookup > E_min, self.E_lookup < E_max)])
+        self.sed_lookup *= exp_mean / model_mean
+        self.sed_scale = 1.0
 
     def plot(self, ax: plt.Axes, E_min: Optional[float] = None, E_max: Optional[float] = None):
         utils.format_axes(ax)
-        plot_label = self.name if self.E_scale is None else self.name + f" x {self.E_scale:.2f}"
-        mask = np.ones_like(self.E, dtype=bool)
+        plot_label = self.name + f" ($\\times {self.sed_scale:.2f}$)"
+        mask = np.ones_like(self.E_lookup, dtype=bool)
         if E_min is not None:
-            mask[self.E < E_min] = False
+            mask[self.E_lookup < E_min] = False
         if E_max is not None:
-            mask[self.E > E_max] = False
-        ax.plot(self.E[mask], self.sed[mask], color=self.color, label=plot_label)
+            mask[self.E_lookup > E_max] = False
+        ax.plot(self.E_lookup[mask], self.sed_scale * self.sed_lookup[mask], color=self.color, label=plot_label)
 
 
-class BasicHadronicModelSED(ModelSED):
-
+class BasicHadronicModelSED(TableLookupSED):
     @classmethod
-    def _from_file(cls, filename: str, name: str, color: str) -> ModelSED:
+    def _from_file(cls, filename: str, name: str, color: str) -> BasicHadronicModelSED:
         """File format by Timur, e.g. data/basic-hadronic-model/SED-KD10-Basic-0.140-Combined"""
         data = np.loadtxt(filename)
-        return cls(name=name, color=color, E=data[:, 0], sed=data[:, 1])
+        return cls(name=name, color=color, E_lookup=data[:, 0], sed_lookup=data[:, 1])
 
     INTERP_FILES_DIR = CUR_DIR / 'data/basic-hadronic-model'
-    data_for_interp: Optional[Dict[float, ModelSED]] = None
+    data_for_interp: Optional[Dict[float, BasicHadronicModelSED]] = None
 
     @classmethod
     def _read_data_for_interpolation(cls):
@@ -88,9 +130,9 @@ class BasicHadronicModelSED(ModelSED):
         
         find_nearest = lambda arr, value: arr[(np.abs(arr - value)).argmin()]
         z_nearest = find_nearest(available_z_vals, z)
-        E_interp = cls.data_for_interp[z_nearest].E
+        E_interp = cls.data_for_interp[z_nearest].E_lookup
         if np.abs(z_nearest - z) < 0.0001:
-            sed_interp = cls.data_for_interp[z_nearest].sed
+            sed_interp = cls.data_for_interp[z_nearest].sed_lookup
         else:
             z_left = find_nearest(available_z_vals[available_z_vals < z], z)
             z_right = find_nearest(available_z_vals[available_z_vals >= z], z)
@@ -98,12 +140,12 @@ class BasicHadronicModelSED(ModelSED):
             right_contrib = (z - z_left) / (z_right - z_left)
             left_model = cls.data_for_interp[z_left]
             right_model = cls.data_for_interp[z_right]
-            sed_interp = left_model.sed * left_contrib + right_model.sed * right_contrib
+            sed_interp = left_model.sed_lookup * left_contrib + right_model.sed_lookup * right_contrib
         return cls(
             name=f'Basic hadronic model ($z = {z}$)',
             color='#794ece',
-            E=E_interp,
-            sed=sed_interp,
+            E_lookup=E_interp,
+            sed_lookup=sed_interp,
         )
 
 
