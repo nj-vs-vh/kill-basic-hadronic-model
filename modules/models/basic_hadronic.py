@@ -4,17 +4,15 @@ import numpy as np
 import matplotlib.pyplot as plt
 from numba import njit
 import re
-from pathlib import Path
 
 from dataclasses import dataclass
 
-from typing import Any, Optional, Dict, ClassVar
+from typing import Any, Optional, Dict, ClassVar, Tuple
 from nptyping import NDArray
 
-CUR_DIR = Path(__file__).parent
-
-import utils
-from experiment import ExperimentalSED
+from .. import utils
+from ..data_files import DATA_DIR
+from ..experiment import ExperimentalSED
 from .base import ModelSED
 
 
@@ -28,8 +26,13 @@ class TableLookupSED(ModelSED):
     def __post_init__(self):
         assert self.E_lookup.shape == self.sed_lookup.shape
 
+    n_params: ClassVar[int] = 1
+
     def set_parameters(self, normalization: float):
         self.sed_scale = normalization
+
+    def get_parameters(self) -> Tuple[float]:
+        return (self.sed_scale,)
 
     allows_njit: ClassVar[bool] = True
 
@@ -56,7 +59,8 @@ class TableLookupSED(ModelSED):
 
     def plot(self, ax: plt.Axes, E_min: Optional[float] = None, E_max: Optional[float] = None):
         utils.format_axes(ax)
-        plot_label = self.name + f" ($\\times {self.sed_scale:.2f}$)"
+        # plot_label = self.name + f" ($\\times {self.sed_scale:.2f}$)"
+        plot_label = self.name
         mask = np.ones_like(self.E_lookup, dtype=bool)
         if E_min is not None:
             mask[self.E_lookup < E_min] = False
@@ -72,7 +76,7 @@ class BasicHadronicModelSED(TableLookupSED):
         data = np.loadtxt(filename)
         return cls(name=name, color=color, E_lookup=data[:, 0], sed_lookup=data[:, 1])
 
-    INTERP_FILES_DIR = CUR_DIR / '../data/basic-hadronic-model'
+    INTERP_FILES_DIR = DATA_DIR / 'basic-hadronic-model'
     data_for_interp: Optional[Dict[float, BasicHadronicModelSED]] = None
 
     @classmethod
@@ -109,7 +113,7 @@ class BasicHadronicModelSED(TableLookupSED):
             right_model = cls.data_for_interp[z_right]
             sed_interp = left_model.sed_lookup * left_contrib + right_model.sed_lookup * right_contrib
         return cls(
-            name=f'Basic hadronic ($z = {z}$)',
+            name=f'Basic hadronic model',
             color='#794ece',
             E_lookup=E_interp,
             sed_lookup=sed_interp,

@@ -9,9 +9,9 @@ from dataclasses import dataclass
 from nptyping import NDArray
 from typing import Callable, ClassVar, Tuple
 
-import utils
+from .. import utils
 from .base import ModelSED
-from experiment import Object
+from ..experiment import Object
 
 import astropy.units as u
 from agnprocesses.processes.ebl import tau_gilmore
@@ -60,7 +60,7 @@ class LogparabolaThroughEblSED(AnalyticalSED):
             return logparabola * np.exp(-tau)
         
         super().__init__(
-            name=f'Logparabola source + EBL abs. (z={redshift})',
+            name=f'Logparabola source + EBL absorption',
             color=self.__class__.COLOR,
             sed_func=sed,
             sed_integral=utils.trapz_integral_func(sed, allows_njit=self.allows_njit, n_pts=5),
@@ -85,5 +85,10 @@ class LogparabolaThroughEblSED(AnalyticalSED):
         A_est = A_no_absorption ** 2 / self.sed_func(1.0, A_no_absorption, c1_est, c2_est)
         return A_est, c1_est, c2_est
 
+    n_params: ClassVar[int] = 3
+
     def set_parameters(self, A: float, c1: float, c2: float):
         self.model_params = (A, c1, c2)
+
+    def get_parameters(self) -> Tuple[float, float, float]:
+        return tuple(self.model_params)

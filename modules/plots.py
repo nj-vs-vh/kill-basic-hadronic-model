@@ -2,8 +2,8 @@ import matplotlib.pyplot as plt
 
 from typing import List
 
-from models.base import ModelSED
-from experiment import Object
+from .models.base import ModelSED
+from .experiment import Object
 
 
 def plot_objects_with_model(objects: List[Object], models: List[ModelSED]):

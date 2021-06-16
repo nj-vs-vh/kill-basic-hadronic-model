@@ -6,18 +6,19 @@ from numba import njit
 
 import re
 import yaml
-from pathlib import Path
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
 
-from typing import Any, Callable, ClassVar, List, Tuple
+from typing import Any, Callable, List, Tuple, Optional
 from nptyping import NDArray
 
-from models.base import ModelSED
-import utils
+from .models.base import ModelSED
+from . import utils
+from .data_files import DATA_DIR
 
 
-CUR_DIR = Path(__file__).parent
+def is_shifted(E_factor: float) -> bool:
+    return np.abs(E_factor - 1) > 1e-3
 
 
 @dataclass
@@ -33,9 +34,15 @@ class ExperimentalSED(ABC):
     sed_lower: NDArray[(Any,), float]  # sigma or 95% CL???
     sed_upper: NDArray[(Any,), float]
 
+    E_factor: float = 1.0
+
     E_uncertainty: float = 0.0001  # essentialy no uncertainty by default
 
-    DATA_DIR: ClassVar[Path] = CUR_DIR / "data"
+    def __str__(self) -> str:
+        shifted_str = (
+            f" (shifted {100 * (self.E_factor - 1):.2f} %)" if is_shifted(self.E_factor) else ""
+        )
+        return f"{self.name}{shifted_str}"
 
     @classmethod
     @abstractmethod
@@ -49,12 +56,14 @@ class ExperimentalSED(ABC):
         pass
 
     @classmethod
-    def for_object(cls, obj_name: str) -> ExperimentalSED:
+    def for_object(
+        cls, obj_name: str, include_obj_name_in_sed_name: bool = False
+    ) -> ExperimentalSED:
         """Object name is e.g. 1ES0229+200"""
         dir_patt = f".*{re.escape(obj_name)}"
         file_patt = cls._data_file_pattern(obj_name)
         object_path = None
-        for dir in cls.DATA_DIR.iterdir():
+        for dir in DATA_DIR.iterdir():
             if re.match(dir_patt, dir.name):
                 for file in dir.iterdir():
                     if re.match(file_patt, file.name):
@@ -62,7 +71,9 @@ class ExperimentalSED(ABC):
                         break
         if object_path is None:
             raise FileExistsError(f"File with data for {obj_name} not found")
-        return cls._from_file(filename=str(object_path), name=obj_name)
+        return cls._from_file(
+            filename=str(object_path), name=obj_name if include_obj_name_in_sed_name else None
+        )
 
     def get_logprior(self) -> Callable[[float], float]:
         log_E_uncertainty_disp: float = np.log(1 + self.E_uncertainty) ** 2
@@ -95,7 +106,9 @@ class ExperimentalSED(ABC):
             logL = 0.0
             for i in range(bin_count):
                 # shifting experimental bin on E_factor and computing average model SED in shifted bin
-                model_sed_in_shifted_bin = model_average(E_factor * E_left[i], E_factor * E_right[i], *model_params)
+                model_sed_in_shifted_bin = model_average(
+                    E_factor * E_left[i], E_factor * E_right[i], *model_params
+                )
                 if np.isnan(model_sed_in_shifted_bin):
                     return -np.inf
                 model_minus_mean = model_sed_in_shifted_bin - sed_mean_shifted[i]
@@ -109,7 +122,7 @@ class ExperimentalSED(ABC):
                             2 * (sed_mean_shifted[i] - sed_lower_shifted[i]) ** 2
                         )
             return logL
-        
+
         if model.allows_njit:
             loglikelihood = njit(loglikelihood)
 
@@ -117,13 +130,14 @@ class ExperimentalSED(ABC):
 
     def with_E_factor(self, E_factor: float, color: str = None) -> ExperimentalSED:
         return self.__class__(
-            name=self.name + f" shifted {100 * (E_factor - 1):.2f} %",
+            name=self.name,
             color=color or self.color,
             E_right=self.E_right * E_factor,
             E_left=self.E_left * E_factor,
             sed_mean=self.sed_mean * E_factor ** 2,
             sed_upper=self.sed_upper * E_factor ** 2,
             sed_lower=self.sed_lower * E_factor ** 2,
+            E_factor=E_factor,
         )
 
     def plot(self, ax: plt.Axes):
@@ -144,7 +158,7 @@ class ExperimentalSED(ABC):
             ),
             fmt=fmt,
             color=self.color,
-            label=self.name,
+            label=str(self),
         )
         with_upper_bound = np.logical_not(with_both_bounds)
         ax.errorbar(
@@ -163,7 +177,7 @@ class FermiSED(ExperimentalSED):
     SYSTEMATIC_E_UNCERAINTY = 0.1
 
     @classmethod
-    def _from_file(cls, filename: str, name: str) -> FermiSED:
+    def _from_file(cls, filename: str, name: Optional[str] = None) -> FermiSED:
         with open(filename) as fermifile:
             fermifile.readline()  # skipping first line
             fermi_data = []
@@ -173,7 +187,7 @@ class FermiSED(ExperimentalSED):
         fermi_data *= 1e-6  # MeV -> TeV
         fermi_data[fermi_data < 0] = -np.inf  # -1 is used to signify 'no lower bound'
         return cls(
-            name=name + " (Fermi)",
+            name=name + " (Fermi)" if name is not None else "Fermi",
             color=cls.COLOR,
             E_left=fermi_data[:, 0],
             E_right=fermi_data[:, 2],
@@ -204,7 +218,7 @@ class IactSED(ExperimentalSED):
         iact_data = np.array(iact_data, dtype=float)
 
         # WTF?????
-        col_offset = 1 if re.match('.*' + re.escape('1ES0229+200-IACT'), filename) else 0
+        col_offset = 1 if re.match(".*" + re.escape("1ES0229+200-IACT"), filename) else 0
 
         E_mean_bin = iact_data[:, col_offset + 0]
 
@@ -213,7 +227,7 @@ class IactSED(ExperimentalSED):
 
         sed_mean = dnde2sed(iact_data[:, col_offset + 3])
         return cls(
-            name=name + " (IACT)",
+            name=name + " (IACT)" if name is not None else "IACT",
             color=cls.COLOR,
             E_left=iact_data[:, col_offset + 1],
             E_right=iact_data[:, col_offset + 2],
@@ -230,7 +244,7 @@ class IactSED(ExperimentalSED):
         return fr"1ES\s?{re.escape(obj_name)}-IACT"
 
 
-with open(CUR_DIR / "data/redshifts.yaml") as f:
+with open(DATA_DIR / "redshifts.yaml") as f:
     redshift_data = yaml.safe_load(f)
 
 
@@ -240,6 +254,9 @@ class Object:
     z: float
     seds: List[ExperimentalSED]
 
+    def __str__(self) -> str:
+        return f'{self.name} (shifts: {", ".join(str(sed.E_factor) for sed in self.seds)})'
+
     @classmethod
     def by_name(cls, name: str):
         return cls(
@@ -248,12 +265,16 @@ class Object:
             seds=[
                 FermiSED.for_object(name),
                 IactSED.for_object(name),
-            ]
+            ],
         )
+
+    @property
+    def n_seds(self) -> int:
+        return len(self.seds)
 
     def get_joint_logprior(self):
         logpriors = [sed.get_logprior() for sed in self.seds]
-        
+
         return lambda E_factors: sum(
             logprior(E_factor) for logprior, E_factor in zip(logpriors, E_factors)
         )
@@ -262,8 +283,7 @@ class Object:
         loglikes = [sed.get_loglikelihood(model) for sed in self.seds]
 
         return lambda model_params, E_factors: sum(
-            loglike(model_params, E_factor)
-            for loglike, E_factor in zip(loglikes, E_factors)
+            loglike(model_params, E_factor) for loglike, E_factor in zip(loglikes, E_factors)
         )
 
     def get_joint_logposterior(self, model: ModelSED):
@@ -282,17 +302,26 @@ class Object:
 
     def with_E_factors(self, *E_factors) -> Object:
         if len(E_factors) != len(self.seds):
-            raise ValueError(f"Number of E factors must be the same as the number of SEDs for the object")
+            raise ValueError(
+                f"Number of E factors must be the same as the number of SEDs for the object"
+            )
+
+        # workaround to plot shifted SEDs in different color
+        SHIFTED_COLOR = "#3698d1"
+
         return self.__class__(
-            name=self.name + ' (shifted SEDs)',
+            name=self.name,
             z=self.z,
-            seds=[sed.with_E_factor(E_factor) for sed, E_factor in zip(self.seds, E_factors)]
+            seds=[
+                sed.with_E_factor(E_factor, color=SHIFTED_COLOR if is_shifted(E_factor) else None)
+                for sed, E_factor in zip(self.seds, E_factors)
+            ],
         )
 
     @property
     def E_min(self):
         return min(np.min(sed.E_left) for sed in self.seds)
-    
+
     @property
     def E_max(self):
         return max(np.max(sed.E_right) for sed in self.seds)
@@ -309,4 +338,4 @@ if __name__ == "__main__":
     FermiSED.for_object("1ES0229+200")
     IactSED.for_object("1ES0229+200")
 
-    Object.by_name('1ES0347-121')
+    Object.by_name("1ES0347-121")
