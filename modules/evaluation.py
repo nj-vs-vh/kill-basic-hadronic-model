@@ -38,12 +38,14 @@ def compare_models_for_objects(
     akaike_weights = likelihoods / np.sum(likelihoods)
 
     def results_repr(weight, model, obj) -> str:
-        return f"{model} for {obj}: {weight:.6f}"
+        return f"\t{model}\t|\t{obj}\t|\t{weight:.6f}"
+
+    header = "\tModel\t|\tObject\t|\tWeight"
 
     newline = "\n"
 
     print(
-        f"Akaike weights: {newline.join(results_repr(*t) for t in zip(akaike_weights, models, objects))}"
+        f"Akaike weights:\n\n{header}\n{newline.join(results_repr(*t) for t in zip(akaike_weights, models, objects))}"
     )
 
     return akaike_weights

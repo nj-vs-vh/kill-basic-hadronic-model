@@ -57,3 +57,10 @@ def trapz_integral_func(
         return np.trapz(f(xs, *params), xs)
 
     return f_integral if not allows_njit else njit(f_integral)
+
+
+def enlarge_log_interval(left, right, pad = 0.05):
+    mid = np.sqrt(left * right)
+    hr = right / mid
+
+    return mid / (hr ** (1 + pad)), mid * (hr ** (1 + pad))

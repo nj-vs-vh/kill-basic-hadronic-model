@@ -14,7 +14,7 @@ from .base import ModelSED
 from ..experiment import Object
 
 import astropy.units as u
-from agnprocesses.processes.ebl import tau_gilmore
+from agnprocesses.ebl import tau_gilmore
 
 
 @dataclass
@@ -68,7 +68,8 @@ class LogparabolaThroughEblSED(AnalyticalSED):
 
     @classmethod
     def for_object(cls, obj: Object) -> LogparabolaThroughEblSED:
-        return cls(E_min=obj.E_min, E_max=obj.E_max, redshift=obj.z)
+        E_min, E_max = utils.enlarge_log_interval(obj.E_min, obj.E_max, pad=0.2)
+        return cls(E_min=E_min, E_max=E_max, redshift=obj.z)
 
     def estimate_params(self, obj: Object) -> Tuple[float, float, float]:
         c1_est = 0.05

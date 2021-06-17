@@ -113,7 +113,7 @@ class BasicHadronicModelSED(TableLookupSED):
             right_model = cls.data_for_interp[z_right]
             sed_interp = left_model.sed_lookup * left_contrib + right_model.sed_lookup * right_contrib
         return cls(
-            name=f'Basic hadronic model',
+            name=f'Basic hadronic cascade model',
             color='#794ece',
             E_lookup=E_interp,
             sed_lookup=sed_interp,

@@ -6,6 +6,7 @@ from numba import njit
 
 import re
 import yaml
+from itertools import chain
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
 
@@ -39,10 +40,12 @@ class ExperimentalSED(ABC):
     E_uncertainty: float = 0.0001  # essentialy no uncertainty by default
 
     def __str__(self) -> str:
-        shifted_str = (
-            f" (shifted {100 * (self.E_factor - 1):.2f} %)" if is_shifted(self.E_factor) else ""
-        )
-        return f"{self.name}{shifted_str}"
+        # shifted_str = f" (shifted {100 * (self.E_factor - 1):.2f} %)"
+        shifted_str = " (shifted)"
+        return f"{self.name}{shifted_str if is_shifted(self.E_factor) else ''}"
+
+    def __repr__(self) -> str:
+        return str(self)
 
     @classmethod
     @abstractmethod
@@ -96,10 +99,13 @@ class ExperimentalSED(ABC):
         sed_mean = self.sed_mean
         sed_upper = self.sed_upper
         sed_lower = self.sed_lower
+        max_E_shift_abs = 3 * self.E_uncertainty
 
         model_average = model.get_average_func()
 
-        def loglikelihood(model_params: Tuple[float], E_factor: float):
+        def loglikelihood(model_params: Tuple[float], E_factor: float) -> float:
+            if np.abs(E_factor - 1) > max_E_shift_abs:
+                return -np.inf
             sed_mean_shifted = sed_mean * E_factor ** 2
             sed_upper_shifted = sed_upper * E_factor ** 2
             sed_lower_shifted = sed_lower * E_factor ** 2
@@ -147,6 +153,13 @@ class ExperimentalSED(ABC):
         E_err_left = E_mean - self.E_left
         E_err_right = self.E_right - E_mean
 
+        # check if the same data has already been plotted and listed on legend
+        label = str(self)
+        _, legend_texts = ax.get_legend_handles_labels()
+        for legend_text in legend_texts:
+            if label == legend_text:
+                return
+
         fmt = "o"
         ax.errorbar(
             E_mean[with_both_bounds],
@@ -158,7 +171,7 @@ class ExperimentalSED(ABC):
             ),
             fmt=fmt,
             color=self.color,
-            label=str(self),
+            label=label,
         )
         with_upper_bound = np.logical_not(with_both_bounds)
         ax.errorbar(
@@ -174,7 +187,7 @@ class ExperimentalSED(ABC):
 
 class FermiSED(ExperimentalSED):
     COLOR = "#dd4040"
-    SYSTEMATIC_E_UNCERAINTY = 0.1
+    SYSTEMATIC_E_UNCERAINTY = 0.05
 
     @classmethod
     def _from_file(cls, filename: str, name: Optional[str] = None) -> FermiSED:
@@ -206,7 +219,7 @@ class FermiSED(ExperimentalSED):
 
 class IactSED(ExperimentalSED):
     COLOR = "#4ece7d"
-    SYSTEMATIC_E_UNCERAINTY = 0.35
+    SYSTEMATIC_E_UNCERAINTY = 0.15
 
     @classmethod
     def _from_file(cls, filename: str, name: str):
@@ -307,13 +320,17 @@ class Object:
             )
 
         # workaround to plot shifted SEDs in different color
-        SHIFTED_COLOR = "#3698d1"
+        # TODO: auto color change with E scale shift
+        def get_shifted_color(sed: ExperimentalSED) -> str:
+            return "#3698d1" if "IACT" in sed.name else "#ce2dab"
 
         return self.__class__(
             name=self.name,
             z=self.z,
             seds=[
-                sed.with_E_factor(E_factor, color=SHIFTED_COLOR if is_shifted(E_factor) else None)
+                sed.with_E_factor(
+                    E_factor, color=get_shifted_color(sed) if is_shifted(E_factor) else None
+                )
                 for sed, E_factor in zip(self.seds, E_factors)
             ],
         )
@@ -326,9 +343,24 @@ class Object:
     def E_max(self):
         return max(np.max(sed.E_right) for sed in self.seds)
 
-    def plot(self, ax: plt.Axes):
+    def plot(self, ax: plt.Axes, adjust_ylim_with_pad: Optional[float] = None):
         for sed in self.seds:
             sed.plot(ax)
+
+        if adjust_ylim_with_pad is not None:
+            min_sed = np.min(
+                [
+                    lb
+                    for lb in chain.from_iterable([sed.sed_lower for sed in self.seds])
+                    if np.isfinite(lb)
+                ]
+            )
+            max_sed = np.max(
+                [
+                    ub for ub in chain.from_iterable([sed.sed_upper for sed in self.seds])
+                ]
+            )
+            ax.set_ylim(*utils.enlarge_log_interval(min_sed, max_sed, pad=adjust_ylim_with_pad))
 
 
 all_objects = [Object.by_name(name) for name in redshift_data.keys()]

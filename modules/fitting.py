@@ -158,6 +158,4 @@ def fit_model_to_object_mcmc(
         )
 
     theta_maxloglike = utils.max_loglike_point(sample, loglike, progress=True)
-    return _theta_to_model_params_and_E_factors(
-        theta_maxloglike, model.n_params, exp_E_varying
-    )
+    return _theta_to_model_params_and_E_factors(theta_maxloglike, model.n_params, exp_E_varying)
