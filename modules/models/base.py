@@ -12,6 +12,7 @@ from typing import Optional, Callable, ClassVar, Tuple
 class ModelSED(ABC):
     name: str
     color: str
+    linestyle: str
 
     allows_njit: ClassVar[bool] = False
 

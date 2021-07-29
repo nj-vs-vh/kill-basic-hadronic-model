@@ -53,7 +53,9 @@ class TableLookupSED(ModelSED):
         E_max = np.max(exp.E_right)
         good_exp_sed = exp.sed_mean[np.isfinite(exp.sed_lower)]
         exp_mean = np.mean(good_exp_sed)
-        model_mean = np.mean(self.sed_lookup[np.logical_and(self.E_lookup > E_min, self.E_lookup < E_max)])
+        model_mean = np.mean(
+            self.sed_lookup[np.logical_and(self.E_lookup > E_min, self.E_lookup < E_max)]
+        )
         self.sed_lookup *= exp_mean / model_mean
         self.sed_scale = 1.0
 
@@ -66,7 +68,13 @@ class TableLookupSED(ModelSED):
             mask[self.E_lookup < E_min] = False
         if E_max is not None:
             mask[self.E_lookup > E_max] = False
-        ax.plot(self.E_lookup[mask], self.sed_scale * self.sed_lookup[mask], color=self.color, label=plot_label)
+        ax.plot(
+            self.E_lookup[mask],
+            self.sed_scale * self.sed_lookup[mask],
+            color=self.color,
+            label=plot_label,
+            linestyle=self.linestyle,
+        )
 
 
 class BasicHadronicModelSED(TableLookupSED):
@@ -74,20 +82,20 @@ class BasicHadronicModelSED(TableLookupSED):
     def _from_file(cls, filename: str, name: str, color: str) -> BasicHadronicModelSED:
         """File format by Timur, e.g. data/basic-hadronic-model/SED-KD10-Basic-0.140-Combined"""
         data = np.loadtxt(filename)
-        return cls(name=name, color=color, E_lookup=data[:, 0], sed_lookup=data[:, 1])
+        return cls(name=name, color=color, linestyle='-', E_lookup=data[:, 0], sed_lookup=data[:, 1])
 
-    INTERP_FILES_DIR = DATA_DIR / 'basic-hadronic-model'
+    INTERP_FILES_DIR = DATA_DIR / "basic-hadronic-model"
     data_for_interp: Optional[Dict[float, BasicHadronicModelSED]] = None
 
     @classmethod
     def _read_data_for_interpolation(cls):
         data_for_interp = dict()
-        filename_patt = r'SED-KD10-Basic-(.*)-Combined'
+        filename_patt = r"SED-KD10-Basic-(.*)-Combined"
         for filename in cls.INTERP_FILES_DIR.iterdir():
             z_match = re.match(filename_patt, filename.name)
             if z_match:
                 z = float(z_match.groups()[0])
-                data_for_interp[z] = cls._from_file(filename, str(z), color='b')
+                data_for_interp[z] = cls._from_file(filename, str(z), color="b")
         cls.data_for_interp = data_for_interp
 
     @classmethod
@@ -98,7 +106,7 @@ class BasicHadronicModelSED(TableLookupSED):
         available_z_vals = np.array(list(cls.data_for_interp.keys()))
         if not min(available_z_vals) <= z <= max(available_z_vals):
             raise ValueError(f"Requested z value falls outside of interpolation range")
-        
+
         find_nearest = lambda arr, value: arr[(np.abs(arr - value)).argmin()]
         z_nearest = find_nearest(available_z_vals, z)
         E_interp = cls.data_for_interp[z_nearest].E_lookup
@@ -111,10 +119,13 @@ class BasicHadronicModelSED(TableLookupSED):
             right_contrib = (z - z_left) / (z_right - z_left)
             left_model = cls.data_for_interp[z_left]
             right_model = cls.data_for_interp[z_right]
-            sed_interp = left_model.sed_lookup * left_contrib + right_model.sed_lookup * right_contrib
+            sed_interp = (
+                left_model.sed_lookup * left_contrib + right_model.sed_lookup * right_contrib
+            )
         return cls(
-            name=f'Basic hadronic cascade model',
-            color='#794ece',
+            name=f"Basic hadronic cascade model",
+            linestyle='-',
+            color="#794ece",
             E_lookup=E_interp,
             sed_lookup=sed_interp,
         )

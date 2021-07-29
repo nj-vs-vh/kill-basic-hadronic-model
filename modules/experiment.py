@@ -27,6 +27,7 @@ class ExperimentalSED(ABC):
     # All energies in TeV!
     name: str
     color: str
+    marker: str
     # bin edges
     E_left: NDArray[(Any,), float]
     E_right: NDArray[(Any,), float]
@@ -106,9 +107,9 @@ class ExperimentalSED(ABC):
         def loglikelihood(model_params: Tuple[float], E_factor: float) -> float:
             if np.abs(E_factor - 1) > max_E_shift_abs:
                 return -np.inf
-            sed_mean_shifted = sed_mean * E_factor ** 2
-            sed_upper_shifted = sed_upper * E_factor ** 2
-            sed_lower_shifted = sed_lower * E_factor ** 2
+            sed_mean_shifted = sed_mean * E_factor
+            sed_upper_shifted = sed_upper * E_factor
+            sed_lower_shifted = sed_lower * E_factor
             logL = 0.0
             for i in range(bin_count):
                 # shifting experimental bin on E_factor and computing average model SED in shifted bin
@@ -137,12 +138,13 @@ class ExperimentalSED(ABC):
     def with_E_factor(self, E_factor: float, color: str = None) -> ExperimentalSED:
         return self.__class__(
             name=self.name,
+            marker=self.marker,
             color=color or self.color,
             E_right=self.E_right * E_factor,
             E_left=self.E_left * E_factor,
-            sed_mean=self.sed_mean * E_factor ** 2,
-            sed_upper=self.sed_upper * E_factor ** 2,
-            sed_lower=self.sed_lower * E_factor ** 2,
+            sed_mean=self.sed_mean * E_factor,
+            sed_upper=self.sed_upper * E_factor,
+            sed_lower=self.sed_lower * E_factor,
             E_factor=E_factor,
         )
 
@@ -160,7 +162,7 @@ class ExperimentalSED(ABC):
             if label == legend_text:
                 return
 
-        fmt = "o"
+        fmt = self.marker
         ax.errorbar(
             E_mean[with_both_bounds],
             self.sed_mean[with_both_bounds],
@@ -202,6 +204,7 @@ class FermiSED(ExperimentalSED):
         return cls(
             name=name + " (Fermi)" if name is not None else "Fermi",
             color=cls.COLOR,
+            marker='o',
             E_left=fermi_data[:, 0],
             E_right=fermi_data[:, 2],
             sed_mean=fermi_data[:, 3],
@@ -242,6 +245,7 @@ class IactSED(ExperimentalSED):
         return cls(
             name=name + " (IACT)" if name is not None else "IACT",
             color=cls.COLOR,
+            marker='s',
             E_left=iact_data[:, col_offset + 1],
             E_right=iact_data[:, col_offset + 2],
             sed_mean=sed_mean,

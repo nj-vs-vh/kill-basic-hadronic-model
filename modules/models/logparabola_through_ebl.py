@@ -42,7 +42,7 @@ class AnalyticalSED(ModelSED):
             raise ValueError(f"You must set model parameters before plotting!")
         utils.format_axes(ax)
         E = np.logspace(np.log10(E_min), np.log10(E_max), 100)
-        ax.plot(E, self.sed_func(E, *self.model_params), color=self.color, label=self.name)
+        ax.plot(E, self.sed_func(E, *self.model_params), color=self.color, label=self.name, linestyle=self.linestyle)
 
 
 class LogparabolaThroughEblSED(AnalyticalSED):
@@ -62,6 +62,7 @@ class LogparabolaThroughEblSED(AnalyticalSED):
         super().__init__(
             name=f'Logparabola source + EBL absorption',
             color=self.__class__.COLOR,
+            linestyle='--',
             sed_func=sed,
             sed_integral=utils.trapz_integral_func(sed, allows_njit=self.allows_njit, n_pts=5),
         )
