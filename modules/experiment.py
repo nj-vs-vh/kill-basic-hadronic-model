@@ -79,6 +79,10 @@ class ExperimentalSED(ABC):
             filename=str(object_path), name=obj_name if include_obj_name_in_sed_name else None
         )
 
+    @property
+    def n_points(self) -> int:
+        return len(self.sed_mean)
+
     def get_logprior(self) -> Callable[[float], float]:
         log_E_uncertainty_disp: float = np.log(1 + self.E_uncertainty) ** 2
 
@@ -146,6 +150,22 @@ class ExperimentalSED(ABC):
             sed_upper=self.sed_upper * E_factor,
             sed_lower=self.sed_lower * E_factor,
             E_factor=E_factor,
+        )
+
+    def with_normal_errors(self) -> ExperimentalSED:
+        non_upper_limits_mask = np.logical_and(np.isfinite(self.sed_lower), np.isfinite(self.sed_upper))
+        sed_sigma = (self.sed_upper[non_upper_limits_mask] - self.sed_lower[non_upper_limits_mask]) / 2
+        sed_mean = self.sed_mean[non_upper_limits_mask]
+        return self.__class__(
+            name=self.name,
+            marker=self.marker,
+            color=self.color,
+            E_right=self.E_right[non_upper_limits_mask],
+            E_left=self.E_left[non_upper_limits_mask],
+            sed_mean=sed_mean,
+            sed_upper=sed_mean + sed_sigma,
+            sed_lower=sed_mean - sed_sigma,
+            E_factor=self.E_factor,
         )
 
     def plot(self, ax: plt.Axes):
@@ -339,6 +359,11 @@ class Object:
             ],
         )
 
+    def with_normal_errors(self) -> Object:
+        return self.__class__(
+            name=self.name + " (normal errors)", z=self.z, seds=[sed.with_normal_errors() for sed in self.seds]
+        )
+
     @property
     def E_min(self):
         return min(np.min(sed.E_left) for sed in self.seds)
@@ -346,6 +371,10 @@ class Object:
     @property
     def E_max(self):
         return max(np.max(sed.E_right) for sed in self.seds)
+
+    @property
+    def n_points(self) -> int:
+        return sum([sed.n_points for sed in self.seds])
 
     def plot(self, ax: plt.Axes, adjust_ylim_with_pad: Optional[float] = None):
         for sed in self.seds:
@@ -364,7 +393,10 @@ class Object:
                     ub for ub in chain.from_iterable([sed.sed_upper for sed in self.seds])
                 ]
             )
-            ax.set_ylim(*utils.enlarge_log_interval(min_sed, max_sed, pad=adjust_ylim_with_pad))
+            ylim_min, ylim_max = utils.enlarge_log_interval(min_sed, max_sed, pad=adjust_ylim_with_pad)
+            ylim_min = None if ylim_min < 0 else ylim_min
+            ylim_max = None if ylim_max < 0 else ylim_max
+            ax.set_ylim(ylim_min, ylim_max)
 
 
 all_objects = [Object.by_name(name) for name in redshift_data.keys()]

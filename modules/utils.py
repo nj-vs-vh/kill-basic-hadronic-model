@@ -60,6 +60,8 @@ def trapz_integral_func(
 
 
 def enlarge_log_interval(left, right, pad = 0.05):
+    if left < 0 or right < 0:
+        return left, right
     mid = np.sqrt(left * right)
     hr = right / mid
 
