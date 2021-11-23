@@ -58,7 +58,7 @@ def fit_model_to_object(
 ):
     exp_E_varying = exp_E_varying or ExpSedEnergyVaryingConfig.for_object(obj, False)
 
-    print("optimizing model...")
+    print(f"optimizing model {model}...")
 
     obj_loglike = obj.get_joint_loglike(model)
 
